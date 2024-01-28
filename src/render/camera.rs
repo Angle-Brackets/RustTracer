@@ -15,6 +15,8 @@ pub struct Camera {
     pixel_delta_u : Vec3,
     pixel_delta_v : Vec3,
     aspect_ratio : f64,
+    defocus_disk_u : Vec3, //Defocus disk horizontal radius
+    defocus_disk_v : Vec3, //Defocus disk vertical radius
 
     //Camera frame basis vectors
     u : Vec3,
@@ -32,11 +34,15 @@ pub struct Camera {
     pub eye : Vec3,
     pub target : Vec3, 
     pub up : Vec3,
+
+    //Depth of field parameters
+    pub defocus_angle : f64, //Variation angle of rays through each pixel
+    pub focus_distance : f64, //Focus distance of camera
 }
 
 
 impl Camera {
-    pub fn new(aspect_ratio : f64, width : u32, samples : u32, depth : u32, field_of_view : f64, e : Vec3, t : Vec3, u : Vec3) -> Self {
+    pub fn new(aspect_ratio : f64, width : u32, samples : u32, depth : u32, field_of_view : f64, e : Vec3, t : Vec3, u : Vec3, defocus_a : f64, focus_d : f64) -> Self {
         Self {
             center : e,
             aspect_ratio : aspect_ratio,
@@ -48,6 +54,8 @@ impl Camera {
             eye : e,
             target : t, 
             up : u,
+            defocus_angle : defocus_a,
+            focus_distance : focus_d,
             ..Default::default()
         }
     }
@@ -101,7 +109,7 @@ impl Camera {
     fn get_ray(&self, i : u32, j : u32, ray : &mut Ray) {
         let pixel_center : Vec3 = self.pixel00_loc + (i as f64 * self.pixel_delta_u) + (j as f64 * self.pixel_delta_v);
         let pixel_sample : Vec3 = pixel_center + self.pixel_sample_square();
-        let ray_origin : Vec3 = self.center;
+        let ray_origin : Vec3 = if self.defocus_angle <= 0.0 {self.center} else {self.defocus_disk_sample()};
         let ray_direction : Vec3 = pixel_sample - ray_origin;
         
         ray.origin = ray_origin;
@@ -116,12 +124,16 @@ impl Camera {
         return (px * self.pixel_delta_u) + (py * self.pixel_delta_v);
     }
 
+    fn defocus_disk_sample(&self) -> Vec3 {
+        let p = Vec3::random_in_unit_disk();
+        return self.center + (p[0] * self.defocus_disk_u) + (p[1] * self.defocus_disk_v);
+    }
+
     fn initialize(&mut self, params : &mut global::Parameters) {
         //FOV and viewport stuff
-        let focal_length : f64 = (self.eye - self.target).length();
         let theta : f64 = self.fov * (PI / 180.0);
         let h : f64 = (theta/2.0).tan();
-        params.viewport_height = 2.0 * h * focal_length;
+        params.viewport_height = 2.0 * h * self.focus_distance;
         params.viewport_width = params.viewport_height * ((self.image_width as f64)/ (self.image_height as f64));
 
         //Calculate the basis vectors
@@ -138,7 +150,12 @@ impl Camera {
         self.pixel_delta_v = viewport_v / params.height as f64;
 
         //Calculate location of the upper left pixel
-        let viewport_upper_left = self.center - (focal_length * self.w) - viewport_u/2.0 - viewport_v/2.0;
+        let viewport_upper_left = self.center - (self.focus_distance * self.w) - viewport_u/2.0 - viewport_v/2.0;
         self.pixel00_loc = viewport_upper_left + 0.5 * (self.pixel_delta_u + self.pixel_delta_v);
+    
+        //Calculate the camera defocus disk basis vectors
+        let defocus_radius : f64 = self.focus_distance * ((self.defocus_angle/2.0) * (PI/180.0)).tan();
+        self.defocus_disk_u = self.u * defocus_radius;
+        self.defocus_disk_v = self.v * defocus_radius;
     }
 }

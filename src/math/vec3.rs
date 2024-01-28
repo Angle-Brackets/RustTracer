@@ -52,6 +52,21 @@ impl Vec3 {
         return -1.0 * on_unit_sphere;
     }
 
+    pub fn random_in_unit_disk() -> Vec3 {
+        let mut rng : rand::rngs::ThreadRng = rand::thread_rng();
+        loop {
+            let p : Vec3 = Vec3::new(
+                rng.gen_range(-1.0..1.0),
+                rng.gen_range(-1.0..1.0),
+                0.0
+            );
+
+            if p.length_squared() < 1.0 {
+                return p;
+            }
+        }
+    }
+
     pub fn x(&self) -> f64{
         return self.vec[0];
     }
