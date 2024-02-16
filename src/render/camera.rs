@@ -7,8 +7,12 @@ use std::fs;
 use std::io::Write;
 use rand::Rng;
 use std::f64::consts::PI;
+use std::thread;
+use std::thread::available_parallelism;
+use std::sync::{Arc, Mutex};
 
-#[derive(Default)]
+
+#[derive(Default, Copy, Clone)]
 pub struct Camera {
     center : Vec3,
     pixel00_loc : Vec3,
@@ -60,7 +64,7 @@ impl Camera {
         }
     }
 
-    fn ray_color(ray : &Ray, depth : u32, world : &mut Box<dyn Hittable>) -> Color3 {
+    fn ray_color(ray : &Ray, depth : u32, world : &HittableList) -> Color3 {
         let mut rec : HitRecord = HitRecord::default();
         
         if depth <= 0 {
@@ -84,24 +88,78 @@ impl Camera {
         return (1.0-a) * Color3::new(1.0,1.0,1.0) + a * Color3::new(0.5, 0.7, 1.0);
     }
     
-    pub fn render(&mut self, params : &mut global::Parameters, world : &mut Box<dyn Hittable>){
+    pub fn render(mut self, params : &mut global::Parameters, world : HittableList, single_threaded : Option<bool>){
+        let single_threaded = single_threaded.unwrap_or(false);
+        if single_threaded {
+            self.single_threaded_render(params, world);
+            return;
+        }
+        
         self.initialize(params);
 
+        //image setup
+        let image_arr: Vec<Vec<Vec3>> = vec![vec![Vec3::default(); self.image_width as usize]; self.image_height as usize];  //Data is written to this.
         let mut image : fs::File = fs::File::create("image.ppm").expect("Unable to create file");
-        writeln!(image, "P3\n{} {}\n255\n", self.image_width, self.image_height).expect("Failed to write data.");
+        
+        //Thread setup
+        let thread_count : usize = available_parallelism().unwrap().get();
+        let mut threads = vec![];
+        let rows_per_thread = self.image_height/(thread_count as u32); //Number of rows assigned to each thread.
+        
+        //Shared pointers for the camera, world, and image array.
+        let camera_arc = Arc::new(self);
+        let world_arc = Arc::new(world);
+        let img_arc = Arc::new(image_arr);
+        let rows_remaining = Arc::new(Mutex::new(self.image_height));
+  
+        for thread in 0..thread_count {
+            let handle: thread::JoinHandle<()> = thread::spawn({
+                let camera = Arc::clone(&camera_arc);
+                let world = Arc::clone(&world_arc);
+                let img = Arc::clone(&img_arc);
+                let row_count = Arc::clone(&rows_remaining);
+                move || {
+                    let image_arr_ptr: *mut Vec<Vec<Vec3>> = Arc::as_ptr(&img) as *mut Vec<Vec<Vec3>>;
+                    //Loop through a protion of the image assigned 
+                    let mut ray : Ray = Ray::default();
+                    for j in 0..rows_per_thread {
+                        let row : u32 = (thread as u32) * rows_per_thread + j;
+                        for i in 0..camera.image_width {
+                            let mut pixel_color : Color3 = Color3::default();
+                            for _ in 0..50 {
+                                camera.get_ray(i, row, &mut ray);
+                                pixel_color += Camera::ray_color(&ray, camera.max_depth, &world);
+                            }
+                            unsafe {
+                                (*image_arr_ptr)[row as usize][i as usize] = pixel_color;
+                            }
+                        }
 
-
-        let mut ray : Ray = Ray::default();
-        for j in 0..self.image_height {
-            println!("Scanlines Remaining: {}\n", self.image_height - j);
-            for i in 0..self.image_width {
-                let mut pixel_color : Color3 = Color3::default();
-                for sample in 0..self.samples_per_pixel {
-                    self.get_ray(i, j, &mut ray);
-                    pixel_color += Camera::ray_color(&ray, self.max_depth, world);
+                        //Remove one from the row count and print. Exiting scope unlocks mutex.
+                        {
+                            let mut num = row_count.lock().unwrap();
+                            *num -= 1;
+                            println!("Rows Remaining: {} ({:?} completed Row {})", num, thread::current().id(), row);
+                        }
+                    }
                 }
+            });
 
-                pixel_color.write_color(&mut image, self.samples_per_pixel);
+            threads.push(handle);
+        }
+
+
+        //Wait for all threads to finish.
+        for handle in threads {
+            handle.join().unwrap();
+        }
+
+
+        //Write data, could also be multithreaded.
+        writeln!(image, "P3\n{} {}\n255\n", self.image_width, self.image_height).expect("Failed to write data.");
+        for j in 0..self.image_height {
+            for i in 0..self.image_width {
+                img_arc[j as usize][i as usize].write_color(&mut image, self.samples_per_pixel);
             }
         }
     }
@@ -157,5 +215,28 @@ impl Camera {
         let defocus_radius : f64 = self.focus_distance * ((self.defocus_angle/2.0) * (PI/180.0)).tan();
         self.defocus_disk_u = self.u * defocus_radius;
         self.defocus_disk_v = self.v * defocus_radius;
+    }
+
+    //Single threaded renderer here for legacy purposes.
+    fn single_threaded_render(mut self, params : &mut global::Parameters, world : HittableList) {
+        self.initialize(params);
+
+        let mut image : fs::File = fs::File::create("image.ppm").expect("Unable to create file");
+        writeln!(image, "P3\n{} {}\n255\n", self.image_width, self.image_height).expect("Failed to write data.");
+
+
+        let mut ray : Ray = Ray::default();
+        for j in 0..self.image_height {
+            println!("Scanlines Remaining: {}\n", self.image_height - j);
+            for i in 0..self.image_width {
+                let mut pixel_color : Color3 = Color3::default();
+                for _ in 0..self.samples_per_pixel {
+                    self.get_ray(i, j, &mut ray);
+                    pixel_color += Camera::ray_color(&ray, self.max_depth, &world);
+                }
+
+                pixel_color.write_color(&mut image, self.samples_per_pixel);
+            }
+        }
     }
 }

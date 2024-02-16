@@ -12,7 +12,7 @@ pub struct HitRecord {
     pub front_face : bool
 }
 
-pub trait Hittable {
+pub trait Hittable : Sync + Send {
     fn hit(&self, ray : &Ray, interval : Interval, hit_record : &mut HitRecord) -> bool;
 }
 

@@ -3,19 +3,20 @@ mod math;
 mod shapes;
 mod render;
 
+
 use math::vec3::{Color3, Vec3, Point3};
 use math::ray::Ray;
 use math::interval::Interval;
 use shapes::hittable::{HitRecord, Hittable, HittableList};
-use shapes::material::{self, Material};
-use shapes::sphere::{self, Sphere};
+use shapes::material::{Material};
+use shapes::sphere::{Sphere};
 use render::camera::Camera;
 use rand::Rng;
 
 
 fn main() {
     let mut parameters : global::Parameters = global::Parameters::new(400, 225);
-    let mut camera : Camera = Camera::new(16.0/9.0, 1200, 500, 50, 20.0, Vec3::new(13.0, 2.0, 3.0), Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 0.6, 10.0);
+    let camera : Camera = Camera::new(16.0/9.0, 400, 500, 50, 20.0, Vec3::new(13.0, 2.0, 3.0), Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 0.6, 10.0);
     let mut rng : rand::rngs::ThreadRng = rand::thread_rng();
 
     //Create materials
@@ -24,7 +25,6 @@ fn main() {
 
     //World
     let mut world : HittableList = HittableList::new();
-    let mut world_box : Box<dyn Hittable>;
 
     world.add(Box::new(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0, material_ground)));
     for a in -11..11 {
@@ -64,11 +64,11 @@ fn main() {
 
     let material2 : Material = Material::Lambertian { albedo: Color3::new(0.4, 0.2, 0.1) };
     world.add(Box::new(Sphere::new(Vec3::new(-4.0, -1.0, 0.0), 1.0, material2)));
-
     let material3 : Material = Material::Metal { albedo: Color3::new(0.7, 0.6, 0.5), fuzz: 0.0 };
     world.add(Box::new(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0, material3)));
-
     
-    world_box = Box::new(world); //Last thing you should do!
-    camera.render(&mut parameters, &mut world_box);    
+    //3511.73s at 1920x1080
+    let time = std::time::Instant::now();
+    camera.render(&mut parameters, world, Some(false));   
+    println!("Elapsed: {:.2?}", time.elapsed()); 
 }
