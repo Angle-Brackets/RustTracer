@@ -5,7 +5,7 @@ use std::io::Write;
 use rand::Rng;
 use super::interval::Interval;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Vec3 {
     pub vec : [f64; 3] 
 }

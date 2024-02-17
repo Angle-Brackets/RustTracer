@@ -16,7 +16,7 @@ use rand::Rng;
 
 fn main() {
     let mut parameters : global::Parameters = global::Parameters::new(400, 225);
-    let camera : Camera = Camera::new(16.0/9.0, 400, 500, 50, 20.0, Vec3::new(13.0, 2.0, 3.0), Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 0.6, 10.0);
+    let camera : Camera = Camera::new(16.0/9.0, 1920, 500, 50, 20.0, Vec3::new(13.0, 2.0, 3.0), Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 0.6, 10.0);
     let mut rng : rand::rngs::ThreadRng = rand::thread_rng();
 
     //Create materials

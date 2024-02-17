@@ -3,14 +3,14 @@ use crate::{Ray};
 use crate::{Interval};
 use crate::{global::Parameters};
 use crate::{HitRecord, Hittable, HittableList};
-use std::fs;
+use std::{fs, iter};
 use std::io::Write;
 use rand::Rng;
 use std::f64::consts::PI;
 use std::thread;
 use std::thread::available_parallelism;
-use std::sync::{Arc, Mutex};
-
+use std::sync::{Arc, Mutex, mpsc};
+use std::collections::HashMap;
 
 #[derive(Default, Copy, Clone)]
 pub struct Camera {
@@ -98,7 +98,6 @@ impl Camera {
         self.initialize(params);
 
         //image setup
-        let image_arr: Vec<Vec<Vec3>> = vec![vec![Vec3::default(); self.image_width as usize]; self.image_height as usize];  //Data is written to this.
         let mut image : fs::File = fs::File::create("image.ppm").expect("Unable to create file");
         
         //Thread setup
@@ -109,19 +108,20 @@ impl Camera {
         //Shared pointers for the camera, world, and image array.
         let camera_arc = Arc::new(self);
         let world_arc = Arc::new(world);
-        let img_arc = Arc::new(image_arr);
         let rows_remaining = Arc::new(Mutex::new(self.image_height));
-  
+        
+        let (tx, rx) = mpsc::channel();
+
         for thread in 0..thread_count {
             let handle: thread::JoinHandle<()> = thread::spawn({
                 let camera = Arc::clone(&camera_arc);
                 let world = Arc::clone(&world_arc);
-                let img = Arc::clone(&img_arc);
                 let row_count = Arc::clone(&rows_remaining);
+                let tx_thread = tx.clone();
                 move || {
-                    let image_arr_ptr: *mut Vec<Vec<Vec3>> = Arc::as_ptr(&img) as *mut Vec<Vec<Vec3>>;
                     //Loop through a protion of the image assigned 
                     let mut ray : Ray = Ray::default();
+                    let mut evaluated_rows = vec![vec![Vec3::default(); self.image_width as usize]; rows_per_thread as usize];
                     for j in 0..rows_per_thread {
                         let row : u32 = (thread as u32) * rows_per_thread + j;
                         for i in 0..camera.image_width {
@@ -130,9 +130,8 @@ impl Camera {
                                 camera.get_ray(i, row, &mut ray);
                                 pixel_color += Camera::ray_color(&ray, camera.max_depth, &world);
                             }
-                            unsafe {
-                                (*image_arr_ptr)[row as usize][i as usize] = pixel_color;
-                            }
+
+                            evaluated_rows[j as usize][i as usize] = pixel_color;
                         }
 
                         //Remove one from the row count and print. Exiting scope unlocks mutex.
@@ -140,8 +139,12 @@ impl Camera {
                             let mut num = row_count.lock().unwrap();
                             *num -= 1;
                             println!("Rows Remaining: {} ({:?} completed Row {})", num, thread::current().id(), row);
-                        }
+                        }                        
                     }
+
+                    //Send through channel to be collected at end.
+                    //We pass the thread id as well as the row to sort later.
+                    tx_thread.send((thread, evaluated_rows)).expect("Failed to send rows to receiver.");
                 }
             });
 
@@ -154,12 +157,20 @@ impl Camera {
             handle.join().unwrap();
         }
 
+        //Attach each row to a key in a hashmap (thread -> to an owned vector)
+        let mut rows_map : HashMap<usize, Vec<Vec<Vec3>>> = HashMap::new();
+        for (thread, rows) in rx.try_iter() {
+            rows_map.insert(thread, rows);
+        }
 
         //Write data, could also be multithreaded.
         writeln!(image, "P3\n{} {}\n255\n", self.image_width, self.image_height).expect("Failed to write data.");
-        for j in 0..self.image_height {
-            for i in 0..self.image_width {
-                img_arc[j as usize][i as usize].write_color(&mut image, self.samples_per_pixel);
+        for thread in 0..thread_count {
+            let rows : &Vec<Vec<Vec3>> = rows_map.get(&thread).expect("Failed to extract row from received channel.");
+            for row in rows {
+                for pixel in row {
+                    pixel.write_color(&mut image, self.samples_per_pixel)
+                }
             }
         }
     }
