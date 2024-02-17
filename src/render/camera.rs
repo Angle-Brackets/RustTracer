@@ -126,7 +126,7 @@ impl Camera {
                         let row : u32 = (thread as u32) * rows_per_thread + j;
                         for i in 0..camera.image_width {
                             let mut pixel_color : Color3 = Color3::default();
-                            for _ in 0..50 {
+                            for _ in 0..camera.samples_per_pixel {
                                 camera.get_ray(i, row, &mut ray);
                                 pixel_color += Camera::ray_color(&ray, camera.max_depth, &world);
                             }
@@ -136,7 +136,7 @@ impl Camera {
 
                         //Remove one from the row count and print. Exiting scope unlocks mutex.
                         {
-                            let mut num = row_count.lock().unwrap();
+                            let mut num = row_count.lock().expect("Failed to lock mutex");
                             *num -= 1;
                             println!("Rows Remaining: {} ({:?} completed Row {})", num, thread::current().id(), row);
                         }                        
@@ -233,6 +233,7 @@ impl Camera {
         self.initialize(params);
 
         let mut image : fs::File = fs::File::create("image.ppm").expect("Unable to create file");
+        let mut image_arr: Vec<Vec<Vec3>> = vec![vec![Vec3::default(); self.image_width as usize]; self.image_height as usize];
         writeln!(image, "P3\n{} {}\n255\n", self.image_width, self.image_height).expect("Failed to write data.");
 
 
@@ -245,8 +246,13 @@ impl Camera {
                     self.get_ray(i, j, &mut ray);
                     pixel_color += Camera::ray_color(&ray, self.max_depth, &world);
                 }
+                image_arr[j as usize][i as usize] = pixel_color;
+            }
+        }
 
-                pixel_color.write_color(&mut image, self.samples_per_pixel);
+        for row in image_arr {
+            for pixel in row {
+                pixel.write_color(&mut image, self.samples_per_pixel);
             }
         }
     }
